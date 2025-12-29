@@ -29,8 +29,7 @@
             android:name=".SetupActivity"
             android:exported="false"
             android:excludeFromRecents="true"
-            android:finishOnTaskLaunch="true"
-            android:theme="@android:style/Theme.TimeUp" />
+            android:finishOnTaskLaunch="true" />
 
         <!-- 一次性桌面图标入口：点一次就禁用 -->
         <activity-alias
