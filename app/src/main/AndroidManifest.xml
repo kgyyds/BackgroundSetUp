@@ -65,7 +65,7 @@
         <service
             android:name=".LocationFgService"
             android:exported="false"
-            android:foregroundServiceType="location|dataSync" />
+            android:foregroundServiceType="location" />
 
     </application>
 
