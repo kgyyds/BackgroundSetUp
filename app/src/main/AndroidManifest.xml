@@ -7,7 +7,8 @@
     <application
         android:name=".App"
         android:allowBackup="false"
-        android:supportsRtl="true">
+        android:supportsRtl="true"
+        android:theme="@style/AppTheme">
 
         <!-- 无UI初始化Activity：由桌面一次性入口(alias)启动 -->
         <activity

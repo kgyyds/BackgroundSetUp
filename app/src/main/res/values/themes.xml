@@ -1,8 +1,7 @@
-<resources xmlns:tools="http://schemas.android.com/tools">
-    <style name="Theme.KCCJ" parent="Theme.Material3.DayNight.NoActionBar">
-        <!-- 可选：统一一些默认颜色 -->
-        <item name="android:statusBarColor">@android:color/transparent</item>
-        <item name="android:navigationBarColor">@android:color/transparent</item>
-        <item name="android:windowLightStatusBar">false</item>
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 最小主题：不依赖 Material3 -->
+    <style name="AppTheme" parent="android:Theme.DeviceDefault.NoActionBar">
+        <!-- 可选：如果你未来弹系统对话框等 -->
     </style>
 </resources>
