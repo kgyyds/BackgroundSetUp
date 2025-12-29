@@ -1,237 +1,73 @@
 package com.system.timeup
 
-import android.Manifest
 import android.content.Context
-import android.content.pm.PackageManager
 import android.location.Location
-import android.location.LocationManager
-import android.net.ConnectivityManager
-import android.net.NetworkCapabilities
-import androidx.core.content.ContextCompat
-import androidx.work.CoroutineWorker
-import androidx.work.WorkerParameters
-import com.google.android.gms.location.LocationServices
-import com.google.android.gms.location.Priority
-import kotlinx.coroutines.CancellationException
+import androidx.work.*
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.suspendCancellableCoroutine
-import kotlinx.coroutines.withTimeout
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
-import kotlin.coroutines.resume
-import kotlin.math.max
+import java.util.concurrent.TimeUnit
 
-class SyncWorker(
-    appContext: Context,
-    params: WorkerParameters
-) : CoroutineWorker(appContext, params) {
-
-    companion object {
-        // ✅ 修双跑：同一时刻只允许一个 Worker 真正执行（稳定优先）
-        private val RUNNING = java.util.concurrent.atomic.AtomicBoolean(false)
-    }
+class SyncWorker(appContext: Context, params: WorkerParameters) : CoroutineWorker(appContext, params) {
 
     override suspend fun doWork(): Result {
         val reason = inputData.getString("reason") ?: "未知原因"
+        val lat = inputData.getDouble("lat", Double.NaN)
+        val lon = inputData.getDouble("lon", Double.NaN)
+        val acc = inputData.getFloat("acc", Float.NaN)
+        val ts = inputData.getLong("ts", 0L)
 
-        if (!RUNNING.compareAndSet(false, true)) {
-            FileLog.w(applicationContext, "检测到并发触发：本次跳过（稳定优先）。原因=$reason")
-            return Result.success()
+        if (lat.isNaN() || lon.isNaN()) {
+            FileLog.w(applicationContext, "上报任务取消：没有定位数据（reason=$reason）")
+            return Result.failure()
         }
 
-        return try {
-            Persist.setLastWorkStart(applicationContext, System.currentTimeMillis())
-            FileLog.i(applicationContext, "轨迹任务开始：原因=$reason，尝试次数=$runAttemptCount")
+        FileLog.i(applicationContext, "开始上报：reason=$reason lat=$lat lon=$lon acc=$acc ts=$ts")
 
-            if (!hasLocationPermission()) {
-                FileLog.w(applicationContext, "未检测到定位权限：请在系统设置给本应用开启定位权限（建议：始终允许）")
-                return Result.failure()
-            }
-
-            // 1) 定位：最多 2 次，每次 12 秒超时，避免卡死被系统干掉
-            val loc = getLocationWithMaxAttempts(maxAttempts = 2)
-            if (loc == null) {
-                FileLog.w(applicationContext, "定位最终失败：已尝试2次仍获取不到，本轮结束，等待下一次调度")
-                return Result.retry()
-            }
-
-            logLocation(loc)
-
-            // 2) 网络判断：不让 WorkManager 用 constraint 砍你（我们自己控制）
-            if (!isNetworkAvailable()) {
-                FileLog.w(applicationContext, "当前无可用网络：本次仅记录定位，不进行上报（等待下次调度）")
-                return Result.success()
-            }
-
-            // 3) 上报：最多 3 次
-            val ok = uploadWithMaxAttempts(
-                maxAttempts = 3,
-                urlStr = "https://你的域名/track/upload", // TODO 替换成你的接口
-                loc = loc
-            )
-
-            if (ok) {
-                FileLog.i(applicationContext, "轨迹上报成功 ✅")
-                Result.success()
-            } else {
-                FileLog.w(applicationContext, "轨迹上报最终失败：已尝试3次仍失败，等待下一次调度重试")
-                Result.retry()
-            }
-        } catch (t: Throwable) {
-            if (t is CancellationException) {
-                val sr = try { stopReason } catch (_: Throwable) { -1 }
-                FileLog.w(applicationContext, "任务被系统取消：${t.javaClass.simpleName}:${t.message} stopReason=$sr isStopped=$isStopped")
-                return Result.retry()
-            }
-            FileLog.e(applicationContext, "任务异常：${t.javaClass.simpleName}:${t.message}，准备重试")
-            Result.retry()
-        } finally {
-            RUNNING.set(false)
-        }
-    }
-
-    private fun hasLocationPermission(): Boolean {
-        val fine = ContextCompat.checkSelfPermission(applicationContext, Manifest.permission.ACCESS_FINE_LOCATION) ==
-                PackageManager.PERMISSION_GRANTED
-        val coarse = ContextCompat.checkSelfPermission(applicationContext, Manifest.permission.ACCESS_COARSE_LOCATION) ==
-                PackageManager.PERMISSION_GRANTED
-        return fine || coarse
-    }
-
-    private fun isNetworkAvailable(): Boolean {
-        return try {
-            val cm = applicationContext.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-            val net = cm.activeNetwork ?: return false
-            val caps = cm.getNetworkCapabilities(net) ?: return false
-            caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-        } catch (_: Throwable) {
-            false
-        }
-    }
-
-    /**
-     * 定位最多尝试 maxAttempts 次：
-     * 每次：currentLocation -> fused lastLocation -> LocationManager lastKnown（MIUI兜底）
-     */
-    private suspend fun getLocationWithMaxAttempts(maxAttempts: Int): Location? {
-        for (i in 1..maxAttempts) {
-            try {
-                FileLog.i(applicationContext, "开始获取定位：第 $i/$maxAttempts 次（current→fused缓存→系统缓存）")
-
-                val loc = withTimeout(12_000L) { getBestOneShotLocation() }
-                if (loc != null) {
-                    FileLog.i(applicationContext, "获取定位成功：第 $i/$maxAttempts 次")
-                    return loc
-                }
-
-                FileLog.w(applicationContext, "获取定位失败：第 $i/$maxAttempts 次（全部为空）")
-            } catch (t: Throwable) {
-                if (t is CancellationException) {
-                    val sr = try { stopReason } catch (_: Throwable) { -1 }
-                    FileLog.w(applicationContext, "获取定位被取消：第 $i/$maxAttempts 次，${t.javaClass.simpleName}:${t.message} stopReason=$sr isStopped=$isStopped")
-                    return null
-                }
-                FileLog.w(applicationContext, "获取定位异常：第 $i/$maxAttempts 次，${t.javaClass.simpleName}:${t.message}")
-            }
-
-            if (i < maxAttempts) delay(800L)
-        }
-        return null
-    }
-
-    /**
-     * 一次性获取“最可能拿到的点”：
-     * 1) fused current（新点，最理想）
-     * 2) fused last（缓存点）
-     * 3) LocationManager lastKnown（系统缓存兜底，MIUI 上经常更有用）
-     */
-    private suspend fun getBestOneShotLocation(): Location? {
-        val client = LocationServices.getFusedLocationProviderClient(applicationContext)
-
-        // 1) currentLocation（一次性）
-        val current = suspendCancellableCoroutine<Location?> { cont ->
-            client.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, null)
-                .addOnSuccessListener { loc -> if (cont.isActive) cont.resume(loc) }
-                .addOnFailureListener { e ->
-                    FileLog.w(applicationContext, "currentLocation 失败：${e.javaClass.simpleName}:${e.message}")
-                    if (cont.isActive) cont.resume(null)
-                }
-        }
-        if (current != null) return current
-
-        FileLog.w(applicationContext, "currentLocation 返回为空，尝试 fused lastLocation（缓存兜底）")
-
-        // 2) fused lastLocation（缓存）
-        val fusedLast = suspendCancellableCoroutine<Location?> { cont ->
-            client.lastLocation
-                .addOnSuccessListener { loc -> if (cont.isActive) cont.resume(loc) }
-                .addOnFailureListener { e ->
-                    FileLog.w(applicationContext, "fused lastLocation 失败：${e.javaClass.simpleName}:${e.message}")
-                    if (cont.isActive) cont.resume(null)
-                }
-        }
-        if (fusedLast != null) return fusedLast
-
-        FileLog.w(applicationContext, "fused lastLocation 仍为空，尝试 LocationManager.getLastKnownLocation（系统缓存兜底）")
-
-        // 3) LocationManager lastKnown（系统缓存兜底）
-        return getLastKnownFromLocationManager()
-    }
-
-    private fun getLastKnownFromLocationManager(): Location? {
-        return try {
-            val lm = applicationContext.getSystemService(Context.LOCATION_SERVICE) as LocationManager
-            val gps = runCatching { lm.getLastKnownLocation(LocationManager.GPS_PROVIDER) }.getOrNull()
-            val net = runCatching { lm.getLastKnownLocation(LocationManager.NETWORK_PROVIDER) }.getOrNull()
-            val pass = runCatching { lm.getLastKnownLocation(LocationManager.PASSIVE_PROVIDER) }.getOrNull()
-
-            // 选一个“时间最新”的
-            listOfNotNull(gps, net, pass).maxByOrNull { it.time }
-        } catch (t: Throwable) {
-            FileLog.w(applicationContext, "LocationManager缓存定位读取失败：${t.javaClass.simpleName}:${t.message}")
-            null
-        }
-    }
-
-    private fun logLocation(loc: Location) {
-        val ageMs = max(0L, System.currentTimeMillis() - loc.time)
-        FileLog.i(
-            applicationContext,
-            "定位结果：纬度=${loc.latitude} 经度=${loc.longitude} 精度≈${loc.accuracy}m 来源=${loc.provider ?: "unknown"} 点龄≈${ageMs}ms"
+        val ok = uploadWithMaxAttempts(
+            maxAttempts = 3,
+            urlStr = "https://你的域名/track/upload", // TODO 替换
+            lat = lat, lon = lon, acc = acc, ts = ts
         )
+
+        return if (ok) {
+            FileLog.i(applicationContext, "上报成功 ✅")
+            Result.success()
+        } else {
+            FileLog.w(applicationContext, "上报失败：已尝试3次，等待下次重试")
+            Result.retry()
+        }
     }
 
-    private suspend fun uploadWithMaxAttempts(maxAttempts: Int, urlStr: String, loc: Location): Boolean {
+    private suspend fun uploadWithMaxAttempts(
+        maxAttempts: Int,
+        urlStr: String,
+        lat: Double,
+        lon: Double,
+        acc: Float,
+        ts: Long
+    ): Boolean {
         for (i in 1..maxAttempts) {
             try {
-                FileLog.i(applicationContext, "开始上报轨迹：第 $i/$maxAttempts 次")
-                val ok = postLocation(urlStr, loc)
-                if (ok) {
-                    FileLog.i(applicationContext, "上报成功：第 $i/$maxAttempts 次")
-                    return true
-                }
+                FileLog.i(applicationContext, "上报尝试：第 $i/$maxAttempts 次")
+                val ok = postJson(urlStr, lat, lon, acc, ts)
+                if (ok) return true
                 FileLog.w(applicationContext, "上报失败：第 $i/$maxAttempts 次（HTTP非2xx）")
             } catch (t: Throwable) {
-                if (t is CancellationException) {
-                    val sr = try { stopReason } catch (_: Throwable) { -1 }
-                    FileLog.w(applicationContext, "上报被取消：第 $i/$maxAttempts 次，stopReason=$sr isStopped=$isStopped")
-                    return false
-                }
-                FileLog.w(applicationContext, "上报异常：第 $i/$maxAttempts 次，${t.javaClass.simpleName}:${t.message}")
+                FileLog.w(applicationContext, "上报异常：第 $i/$maxAttempts 次 ${t.javaClass.simpleName}:${t.message}")
             }
             if (i < maxAttempts) delay(1000L * i)
         }
         return false
     }
 
-    private fun postLocation(urlStr: String, loc: Location): Boolean {
+    private fun postJson(urlStr: String, lat: Double, lon: Double, acc: Float, ts: Long): Boolean {
         val payload = JSONObject().apply {
-            put("lat", loc.latitude)
-            put("lon", loc.longitude)
-            put("acc", loc.accuracy)
-            put("ts", loc.time)
-            put("provider", loc.provider ?: "unknown")
+            put("lat", lat)
+            put("lon", lon)
+            put("acc", acc)
+            put("ts", ts)
             put("model", android.os.Build.MODEL ?: "unknown")
         }.toString()
 
@@ -242,12 +78,31 @@ class SyncWorker(
             doOutput = true
             setRequestProperty("Content-Type", "application/json; charset=utf-8")
         }
-
         return try {
-            conn.outputStream.use { os -> os.write(payload.toByteArray(Charsets.UTF_8)) }
+            conn.outputStream.use { it.write(payload.toByteArray(Charsets.UTF_8)) }
             conn.responseCode in 200..299
         } finally {
             conn.disconnect()
+        }
+    }
+
+    companion object {
+        fun enqueueOnce(context: Context, reason: String, loc: Location) {
+            val data = workDataOf(
+                "reason" to reason,
+                "lat" to loc.latitude,
+                "lon" to loc.longitude,
+                "acc" to loc.accuracy,
+                "ts" to loc.time
+            )
+
+            val req = OneTimeWorkRequestBuilder<SyncWorker>()
+                .setInputData(data)
+                .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
+                .build()
+
+            WorkManager.getInstance(context.applicationContext).enqueue(req)
+            FileLog.i(context, "已投递上报任务：reason=$reason")
         }
     }
 }

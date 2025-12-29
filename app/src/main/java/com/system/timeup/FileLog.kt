@@ -1,28 +1,23 @@
 package com.system.timeup
 
 import android.content.Context
-import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
 object FileLog {
-    private const val FILE_NAME = "timeup.log"
-    private const val MAX_BYTES = 512 * 1024
-    private val sdf = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.CHINA)
+    private val sdf = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
 
-    fun i(context: Context, msg: String) = write(context, "信息", msg)
-    fun w(context: Context, msg: String) = write(context, "警告", msg)
-    fun e(context: Context, msg: String) = write(context, "错误", msg)
-
-    @Synchronized
-    private fun write(context: Context, level: String, msg: String) {
-        val f = File(context.filesDir, FILE_NAME)
-        if (f.exists() && f.length() > MAX_BYTES) {
-            val bak = File(context.filesDir, "$FILE_NAME.1")
-            if (bak.exists()) bak.delete()
-            f.renameTo(bak)
-        }
-        f.appendText("${sdf.format(Date())} [$level] $msg\n")
+    private fun write(ctx: Context, level: String, msg: String) {
+        val line = "${sdf.format(Date())} [$level] $msg\n"
+        try {
+            val f = ctx.getFileStreamPath("timeup.log")
+            f.parentFile?.mkdirs()
+            f.appendText(line, Charsets.UTF_8)
+        } catch (_: Throwable) { }
     }
+
+    fun i(ctx: Context, msg: String) = write(ctx, "信息", msg)
+    fun w(ctx: Context, msg: String) = write(ctx, "警告", msg)
+    fun e(ctx: Context, msg: String) = write(ctx, "错误", msg)
 }
