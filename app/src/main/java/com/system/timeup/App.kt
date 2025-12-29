@@ -5,10 +5,9 @@ import android.app.Application
 class App : Application() {
     override fun onCreate() {
         super.onCreate()
-        FileLog.i(this, "App.onCreate -> ensure schedules (soft)")
+        FileLog.i(this, "应用进程启动：执行软补排（闹钟3分钟 + 周期保险）")
 
-        // 软补排：不强依赖，只要进程起来就续上
-        AlarmScheduler.ensureNext(this, AlarmScheduler.DEFAULT_DELAY_MS)
-        WorkKick.ensurePeriodic(this) // 冗余：能跑就跑
+        AlarmScheduler.ensureNext(this, AlarmScheduler.INTERVAL_MS)
+        WorkKick.ensurePeriodic(this)
     }
 }

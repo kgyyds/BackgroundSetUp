@@ -9,6 +9,7 @@ object WorkKick {
     private const val UNIQUE_PERIODIC = "timeup_periodic_sync"
 
     fun kickNow(context: Context, reason: String) {
+        val app = context.applicationContext
         val constraints = Constraints.Builder()
             .setRequiredNetworkType(NetworkType.CONNECTED)
             .build()
@@ -19,30 +20,36 @@ object WorkKick {
             .setInputData(workDataOf("reason" to reason))
             .build()
 
-        WorkManager.getInstance(context).enqueueUniqueWork(
+        WorkManager.getInstance(app).enqueueUniqueWork(
             UNIQUE_ONE_TIME,
             ExistingWorkPolicy.REPLACE,
             req
         )
 
-        FileLog.i(context, "WorkKick.kickNow -> enqueued OneTimeWork reason=$reason")
+        FileLog.i(app, "已投递一次性任务（联网执行）: 原因=$reason")
     }
 
+    /**
+     * 说明：WorkManager 的周期任务最小 15 分钟是系统限制。
+     * 所以这里只能做“额外保险”，3分钟节奏主要由 Alarm 保证。
+     */
     fun ensurePeriodic(context: Context) {
+        val app = context.applicationContext
         val constraints = Constraints.Builder()
             .setRequiredNetworkType(NetworkType.CONNECTED)
             .build()
 
         val req = PeriodicWorkRequestBuilder<SyncWorker>(15, TimeUnit.MINUTES)
             .setConstraints(constraints)
+            .setInputData(workDataOf("reason" to "周期保险(15分钟)"))
             .build()
 
-        WorkManager.getInstance(context).enqueueUniquePeriodicWork(
+        WorkManager.getInstance(app).enqueueUniquePeriodicWork(
             UNIQUE_PERIODIC,
             ExistingPeriodicWorkPolicy.UPDATE,
             req
         )
 
-        FileLog.i(context, "WorkKick.ensurePeriodic -> ensured PeriodicWork (15m)")
+        FileLog.i(app, "已确保周期保险任务存在（15分钟一次，系统限制）")
     }
 }

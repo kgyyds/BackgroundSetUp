@@ -6,16 +6,18 @@ import android.content.Intent
 
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent?) {
-        val action = intent?.action ?: "null"
-        FileLog.i(context, "BootReceiver action=$action -> ensure alarm + kick work")
+        val app = context.applicationContext
+        val action = intent?.action ?: "未知"
 
-        // 开机给 60s 缓冲更稳（系统忙）
-        AlarmScheduler.ensureNext(context.applicationContext, 60_000L)
+        FileLog.i(app, "系统广播触发：$action，执行补排（闹钟+任务+保险）")
 
-        // 同时 kick 一个 OneTimeWork（网络满足就跑）
-        WorkKick.kickNow(context.applicationContext, reason = "boot:$action")
+        // 开机/变更时给 30 秒缓冲更稳
+        AlarmScheduler.ensureNext(app, 30_000L)
 
-        // 冗余 periodic
-        WorkKick.ensurePeriodic(context.applicationContext)
+        // 补踢一次联网任务（有网才会跑）
+        WorkKick.kickNow(app, reason = "系统广播:$action")
+
+        // 确保 15分钟周期保险存在
+        WorkKick.ensurePeriodic(app)
     }
 }

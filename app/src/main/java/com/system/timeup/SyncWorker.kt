@@ -12,31 +12,30 @@ class SyncWorker(
 ) : CoroutineWorker(appContext, params) {
 
     override suspend fun doWork(): Result {
-        val reason = inputData.getString("reason") ?: "unknown"
-        FileLog.i(applicationContext, "SyncWorker start reason=$reason attempt=$runAttemptCount")
+        val reason = inputData.getString("reason") ?: "未知原因"
+        val now = System.currentTimeMillis()
+        Persist.setLastWorkStart(applicationContext, now)
+
+        FileLog.i(applicationContext, "联网任务开始：原因=$reason，尝试次数=$runAttemptCount")
 
         return try {
-            // ✅ 先用一个最小联网探测（以后你换成真实 API 上传）
-            // 选择一个非常轻的请求：你可以换成自己的 API
-            val ok = ping("https://www.baidu.com/")
-            FileLog.i(applicationContext, "SyncWorker network ping ok=$ok")
-
+            // 你后面换成真实API上传即可
+            val ok = ping("https://www.google.com/generate_204")
             if (ok) {
-                FileLog.i(applicationContext, "SyncWorker success")
+                FileLog.i(applicationContext, "联网任务成功：网络正常 / 请求成功")
                 Result.success()
             } else {
-                FileLog.w(applicationContext, "SyncWorker failed -> retry")
+                FileLog.w(applicationContext, "联网任务失败：网络/请求异常，准备重试")
                 Result.retry()
             }
         } catch (t: Throwable) {
-            FileLog.e(applicationContext, "SyncWorker exception: ${t.javaClass.simpleName}:${t.message} -> retry")
+            FileLog.e(applicationContext, "联网任务异常：${t.javaClass.simpleName}:${t.message}，准备重试")
             Result.retry()
         }
     }
 
     private fun ping(urlStr: String): Boolean {
-        val url = URL(urlStr)
-        val conn = (url.openConnection() as HttpURLConnection).apply {
+        val conn = (URL(urlStr).openConnection() as HttpURLConnection).apply {
             connectTimeout = 8000
             readTimeout = 8000
             instanceFollowRedirects = true
@@ -45,7 +44,6 @@ class SyncWorker(
         return try {
             conn.connect()
             val code = conn.responseCode
-            // generate_204: 204 代表通了
             code in 200..399
         } finally {
             conn.disconnect()

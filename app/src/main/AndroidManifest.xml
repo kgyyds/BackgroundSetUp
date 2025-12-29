@@ -7,7 +7,7 @@
     <!-- Doze 下更稳一点 -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
-    <!-- Android 12+ 精确闹钟（系统可能要求用户允许；代码会自动降级） -->
+    <!-- Android 12+ 精确闹钟（不允许会自动降级，不影响编译） -->
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
 
     <application
@@ -16,7 +16,7 @@
         android:supportsRtl="true"
         android:theme="@style/AppTheme">
 
-        <!-- 无UI初始化 Activity -->
+        <!-- 无UI初始化 Activity：由桌面一次性入口(alias)启动 -->
         <activity
             android:name=".SetupActivity"
             android:exported="false"
@@ -24,7 +24,7 @@
             android:finishOnTaskLaunch="true"
             android:theme="@android:style/Theme.Translucent.NoTitleBar" />
 
-        <!-- 一次性桌面入口：点一次就会在 SetupActivity 里禁用 -->
+        <!-- 一次性桌面入口：点一次就会在 SetupActivity 里被禁用 -->
         <activity-alias
             android:name=".LauncherAlias"
             android:targetActivity=".SetupActivity"
@@ -36,7 +36,7 @@
             </intent-filter>
         </activity-alias>
 
-        <!-- 开机/升级/时间变更：补排闹钟 + kick work -->
+        <!-- 开机/更新/时间变更：补排闹钟 + 投递任务 -->
         <receiver
             android:name=".BootReceiver"
             android:enabled="true"

