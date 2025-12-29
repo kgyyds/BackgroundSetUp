@@ -5,52 +5,49 @@ import androidx.work.*
 import java.util.concurrent.TimeUnit
 
 object WorkKick {
-    private const val UNIQUE_ONE_TIME = "timeup_one_time_sync"
+    private const val UNIQUE_ONE_TIME = "timeup_one_time_sync_single"
     private const val UNIQUE_PERIODIC = "timeup_periodic_sync"
 
+    /**
+     * 立刻踢一次：稳定优先
+     * - 不加网络约束（避免 stopReason=4 网络约束变更导致Work被系统停止）
+     * - KEEP：避免互相替换取消
+     */
     fun kickNow(context: Context, reason: String) {
         val app = context.applicationContext
-        val constraints = Constraints.Builder()
-            .setRequiredNetworkType(NetworkType.CONNECTED)
-            .build()
 
         val req = OneTimeWorkRequestBuilder<SyncWorker>()
-            .setConstraints(constraints)
             .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
             .setInputData(workDataOf("reason" to reason))
             .build()
 
-        // ✅ 不替换正在跑的任务：稳定优先（避免互相取消）
         WorkManager.getInstance(app).enqueueUniqueWork(
             UNIQUE_ONE_TIME,
             ExistingWorkPolicy.KEEP,
             req
         )
 
-        FileLog.i(app, "已投递一次性任务（联网执行）: 原因=$reason（KEEP，避免互相取消）")
+        FileLog.i(app, "已投递一次性任务：原因=$reason（KEEP，不加网络约束，稳定优先）")
     }
 
     /**
-     * 说明：WorkManager 的周期任务最小 15 分钟是系统限制。
-     * 所以这里只能做“额外保险”，3分钟节奏主要由 Alarm 保证。
+     * 周期保险（系统最小 15 分钟限制）
+     * - 不加网络约束，避免被系统“网络状态波动”直接砍掉
+     * - KEEP：稳定优先，不反复更新调度
      */
     fun ensurePeriodic(context: Context) {
         val app = context.applicationContext
-        val constraints = Constraints.Builder()
-            .setRequiredNetworkType(NetworkType.CONNECTED)
-            .build()
 
         val req = PeriodicWorkRequestBuilder<SyncWorker>(15, TimeUnit.MINUTES)
-            .setConstraints(constraints)
             .setInputData(workDataOf("reason" to "周期保险(15分钟)"))
             .build()
 
         WorkManager.getInstance(app).enqueueUniquePeriodicWork(
             UNIQUE_PERIODIC,
-            ExistingPeriodicWorkPolicy.KEEP, // ✅ 稳定优先
+            ExistingPeriodicWorkPolicy.KEEP,
             req
         )
 
-        FileLog.i(app, "已确保周期保险任务存在（15分钟一次，系统限制）")
+        FileLog.i(app, "已确保周期保险任务存在（15分钟一次，稳定优先，不加网络约束）")
     }
 }
