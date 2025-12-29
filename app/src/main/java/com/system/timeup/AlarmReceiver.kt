@@ -3,10 +3,6 @@ package com.system.timeup
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.util.Log
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 import kotlin.concurrent.thread
 
 class AlarmReceiver : BroadcastReceiver() {
@@ -14,26 +10,23 @@ class AlarmReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent?) {
         val pending = goAsync()
 
-        thread(name = "TimeUpAlarmThread") {
+        thread(name = "TimeUpAlarm") {
             try {
-                val ts = sdf.format(Date())
-                Log.i(TAG, "Tick! time=$ts")
+                FileLog.i(context, "AlarmReceiver fired -> kick work + reschedule")
 
-                // TODO：这里以后换成“联网上传/访问API”
-                // 建议：网络请求必须设置超时（比如 8s），失败就打日志，下次再试
+                // 1) kick 一个联网工作（网络满足才会执行）
+                WorkKick.kickNow(context.applicationContext, reason = "alarm")
+
+                // 2) 续命：下一次 15 分钟
+                AlarmScheduler.ensureNext(context.applicationContext, AlarmScheduler.DEFAULT_DELAY_MS)
 
             } catch (t: Throwable) {
-                Log.e(TAG, "Tick failed: ${t.javaClass.simpleName}:${t.message}")
+                FileLog.e(context, "AlarmReceiver error: ${t.javaClass.simpleName}:${t.message}")
+                // 即使异常也要续命
+                AlarmScheduler.ensureNext(context.applicationContext, AlarmScheduler.DEFAULT_DELAY_MS)
             } finally {
-                // ✅ 自续命：固定 15 分钟后再来一次
-                AlarmScheduler.scheduleNext(context.applicationContext, AlarmScheduler.DEFAULT_DELAY_MS)
                 pending.finish()
             }
         }
-    }
-
-    companion object {
-        private const val TAG = "TimeUpTick"
-        private val sdf = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US)
     }
 }

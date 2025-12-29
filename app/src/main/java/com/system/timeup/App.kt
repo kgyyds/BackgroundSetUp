@@ -1,17 +1,14 @@
 package com.system.timeup
 
 import android.app.Application
-import android.util.Log
 
 class App : Application() {
     override fun onCreate() {
         super.onCreate()
-        Log.i(TAG, "App.onCreate -> schedule alarm (soft)")
-        // 不强依赖这里，主要靠 SetupActivity / BootReceiver 补排
-        AlarmScheduler.scheduleNext(this, AlarmScheduler.DEFAULT_DELAY_MS)
-    }
+        FileLog.i(this, "App.onCreate -> ensure schedules (soft)")
 
-    companion object {
-        private const val TAG = "TimeUp"
+        // 软补排：不强依赖，只要进程起来就续上
+        AlarmScheduler.ensureNext(this, AlarmScheduler.DEFAULT_DELAY_MS)
+        WorkKick.ensurePeriodic(this) // 冗余：能跑就跑
     }
 }

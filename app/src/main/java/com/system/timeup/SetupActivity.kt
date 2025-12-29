@@ -4,17 +4,19 @@ import android.app.Activity
 import android.content.ComponentName
 import android.content.pm.PackageManager
 import android.os.Bundle
-import android.util.Log
 
 class SetupActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        Log.i(TAG, "SetupActivity -> schedule alarm, hide icon, finish")
+        FileLog.i(this, "SetupActivity -> init done, hide icon, schedule alarm + kick work")
 
-        // 第一次快速触发：1分钟后打一次log，方便你确认链路OK
-        AlarmScheduler.scheduleNext(this, 60_000L)
+        // 第一次为了“可验证”：1分钟后触发一次（你验收完可改成 DEFAULT_DELAY_MS）
+        AlarmScheduler.ensureNext(this, 60_000L)
+
+        // 立即 kick 一个联网工作（需要网络才跑）
+        WorkKick.kickNow(this, reason = "setup")
 
         disableLauncherAlias()
         finish()
@@ -27,10 +29,6 @@ class SetupActivity : Activity() {
             PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
             PackageManager.DONT_KILL_APP
         )
-        Log.i(TAG, "LauncherAlias disabled -> icon may disappear after launcher refresh")
-    }
-
-    companion object {
-        private const val TAG = "TimeUpSetup"
+        FileLog.i(this, "LauncherAlias disabled (icon should disappear after launcher refresh)")
     }
 }
