@@ -24,34 +24,42 @@ class SyncWorker(
     params: WorkerParameters
 ) : CoroutineWorker(appContext, params) {
 
+    companion object {
+        // ✅ 全局互斥：同一时刻只允许一个 SyncWorker 真正执行
+        private val RUNNING = java.util.concurrent.atomic.AtomicBoolean(false)
+    }
+
     override suspend fun doWork(): Result {
         val reason = inputData.getString("reason") ?: "未知原因"
-        Persist.setLastWorkStart(applicationContext, System.currentTimeMillis())
 
-        FileLog.i(applicationContext, "轨迹任务开始：原因=$reason，尝试次数=$runAttemptCount")
-
-        if (!hasLocationPermission()) {
-            FileLog.w(applicationContext, "轨迹任务失败：未检测到定位权限（请在系统设置中为本应用开启定位权限）")
-            // 不要狂重试：你手动开权限后下一轮 Alarm 还会再跑
-            return Result.failure()
+        // ✅ 修双跑：如果已经有一个在跑，直接跳过（稳定优先）
+        if (!RUNNING.compareAndSet(false, true)) {
+            FileLog.w(applicationContext, "检测到任务并发触发：本次跳过（稳定优先，避免互相取消/抢定位）。原因=$reason")
+            return Result.success()
         }
 
         return try {
-            // 1) 定位：最多 2 次（每次都是“单次获取”，不持续监听）
-            val loc = getLocationWithMaxAttempts(maxAttempts = 2)
+            Persist.setLastWorkStart(applicationContext, System.currentTimeMillis())
+            FileLog.i(applicationContext, "轨迹任务开始：原因=$reason，尝试次数=$runAttemptCount")
 
+            if (!hasLocationPermission()) {
+                FileLog.w(applicationContext, "轨迹任务失败：未检测到定位权限（请在系统设置中为本应用开启定位权限）")
+                return Result.failure()
+            }
+
+            // 1) 定位：最多 2 次（每次：current -> last兜底）
+            val loc = getLocationWithMaxAttempts(maxAttempts = 2)
             if (loc == null) {
                 FileLog.w(applicationContext, "定位最终失败：已尝试2次仍获取不到，本轮结束，等待下一次调度重试")
                 return Result.retry()
             }
 
-            // 打印定位详情（含“点的新鲜度”）
             logLocation(loc)
 
             // 2) 上报：最多 3 次
             val ok = uploadWithMaxAttempts(
                 maxAttempts = 3,
-                urlStr = "https://你的域名/track/upload", // TODO 替换成你的接口
+                urlStr = "https://你的域名/track/upload", // TODO：替换成你的接口
                 loc = loc
             )
 
@@ -64,13 +72,14 @@ class SyncWorker(
             }
         } catch (t: Throwable) {
             if (t is CancellationException) {
-                // 重点：你之前经常遇到的 JobCancellationException 就在这类里
                 val sr = try { stopReason } catch (_: Throwable) { -1 }
-                FileLog.w(applicationContext, "轨迹任务被系统取消：${t.javaClass.simpleName}:${t.message} stopReason=$sr isStopped=$isStopped（多半是Work被替换/系统策略拦截）")
+                FileLog.w(applicationContext, "轨迹任务被系统取消：${t.javaClass.simpleName}:${t.message} stopReason=$sr isStopped=$isStopped")
                 return Result.retry()
             }
             FileLog.e(applicationContext, "轨迹任务异常：${t.javaClass.simpleName}:${t.message}，准备重试")
             Result.retry()
+        } finally {
+            RUNNING.set(false)
         }
     }
 
@@ -82,18 +91,12 @@ class SyncWorker(
         return fine || coarse
     }
 
-    /**
-     * 定位最多尝试 maxAttempts 次：
-     * 每次：先 currentLocation（新点），失败/为空 -> fallback lastLocation（缓存点）
-     */
     private suspend fun getLocationWithMaxAttempts(maxAttempts: Int): Location? {
         for (i in 1..maxAttempts) {
             try {
                 FileLog.i(applicationContext, "开始获取定位：第 $i/$maxAttempts 次（先current，失败再last）")
 
-                // 给一次定位一个可控超时，避免卡死导致被系统取消
                 val loc = withTimeout(12_000L) { getCurrentThenLastOnce() }
-
                 if (loc != null) {
                     FileLog.i(applicationContext, "获取定位成功：第 $i/$maxAttempts 次")
                     return loc
@@ -109,21 +112,14 @@ class SyncWorker(
                 FileLog.w(applicationContext, "获取定位异常：第 $i/$maxAttempts 次，${t.javaClass.simpleName}:${t.message}")
             }
 
-            // 两次之间稍微等一下，避免连续打定位导致更容易被限制
             if (i < maxAttempts) delay(800L)
         }
         return null
     }
 
-    /**
-     * 单次“current -> last”兜底：
-     * - currentLocation：尽量拿“新点”
-     * - 如果 null：尝试 lastLocation（缓存点，成功率更高）
-     */
     private suspend fun getCurrentThenLastOnce(): Location? {
         val client = LocationServices.getFusedLocationProviderClient(applicationContext)
 
-        // 1) currentLocation（一次性）
         val current = suspendCancellableCoroutine<Location?> { cont ->
             client.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, null)
                 .addOnSuccessListener { loc -> if (cont.isActive) cont.resume(loc) }
@@ -136,7 +132,6 @@ class SyncWorker(
 
         FileLog.w(applicationContext, "currentLocation 返回为空，尝试读取 lastLocation（缓存兜底）")
 
-        // 2) lastLocation（读取缓存，不会持续定位）
         val last = suspendCancellableCoroutine<Location?> { cont ->
             client.lastLocation
                 .addOnSuccessListener { loc -> if (cont.isActive) cont.resume(loc) }
@@ -162,15 +157,10 @@ class SyncWorker(
         )
     }
 
-    private suspend fun uploadWithMaxAttempts(
-        maxAttempts: Int,
-        urlStr: String,
-        loc: Location
-    ): Boolean {
+    private suspend fun uploadWithMaxAttempts(maxAttempts: Int, urlStr: String, loc: Location): Boolean {
         for (i in 1..maxAttempts) {
             try {
                 FileLog.i(applicationContext, "开始上报轨迹：第 $i/$maxAttempts 次")
-
                 val ok = postLocation(urlStr, loc)
                 if (ok) {
                     FileLog.i(applicationContext, "上报成功：第 $i/$maxAttempts 次")
@@ -185,17 +175,11 @@ class SyncWorker(
                 }
                 FileLog.w(applicationContext, "上报异常：第 $i/$maxAttempts 次，${t.javaClass.simpleName}:${t.message}")
             }
-
-            // 递增等待，避免打爆服务器/网络栈
             if (i < maxAttempts) delay(1000L * i)
         }
         return false
     }
 
-    /**
-     * 上报（JSON POST）
-     * 你可以按自己的协议加 token/signature/header
-     */
     private fun postLocation(urlStr: String, loc: Location): Boolean {
         val payload = JSONObject().apply {
             put("lat", loc.latitude)
