@@ -9,7 +9,8 @@
 
     <!-- Android 12+ 精确闹钟（不允许会自动降级，不影响编译） -->
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
-
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <application
         android:name=".App"
         android:allowBackup="false"
