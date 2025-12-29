@@ -11,15 +11,12 @@ class SetupActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        Log.i(TAG, "SetupActivity opened -> schedule work, hide launcher icon, then finish")
+        Log.i(TAG, "SetupActivity -> schedule alarm, hide icon, finish")
 
-        // 1) 立刻补排 WorkManager 周期任务（解除 stopped state 的同时保证已安排）
-        TickScheduler.schedule(this)
+        // 第一次快速触发：1分钟后打一次log，方便你确认链路OK
+        AlarmScheduler.scheduleNext(this, 60_000L)
 
-        // 2) 隐藏桌面入口（activity-alias）
         disableLauncherAlias()
-
-        // 3) 秒退（无界面）
         finish()
     }
 

@@ -4,6 +4,12 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
+    <!-- 可选但建议：Doze 下更稳定一点点 -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+
+    <!-- Android 12+ 精确闹钟（系统可能要求用户允许；我们代码会自动降级） -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+
     <application
         android:name=".App"
         android:allowBackup="false"
@@ -30,7 +36,7 @@
             </intent-filter>
         </activity-alias>
 
-        <!-- 开机/更新后补排任务：exported=true + permission 限制只接受系统广播 -->
+        <!-- 开机/更新后补排闹钟 -->
         <receiver
             android:name=".BootReceiver"
             android:enabled="true"
@@ -41,6 +47,11 @@
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             </intent-filter>
         </receiver>
+
+        <!-- 闹钟触发的接收器（不导出） -->
+        <receiver
+            android:name=".AlarmReceiver"
+            android:exported="false" />
 
     </application>
 </manifest>
