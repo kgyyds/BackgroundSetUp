@@ -20,7 +20,7 @@ class SyncWorker(
 
         return try {
             // 你后面换成真实API上传即可
-            val ok = ping("https://www.google.com/generate_204")
+            val ok = ping("https://www.baidu.com/")
             if (ok) {
                 FileLog.i(applicationContext, "联网任务成功：网络正常 / 请求成功")
                 Result.success()
