@@ -10,7 +10,8 @@
     <!-- 定位 -->
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
-
+        <!-- 基站信息 -->
+    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
     <!-- 前台服务（Android 9+） -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <!-- Android 14+ 前台定位服务需要 -->
