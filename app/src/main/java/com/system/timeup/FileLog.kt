@@ -21,3 +21,5 @@ object FileLog {
     fun w(ctx: Context, msg: String) = write(ctx, "警告", msg)
     fun e(ctx: Context, msg: String) = write(ctx, "错误", msg)
 }
+
+//test
